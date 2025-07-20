@@ -1,0 +1,18 @@
+[core]
+workspace_base = "./workspace"
+
+[llm]
+model = "openai/Qwen/Qwen3-8B"
+api_key = "abc123"
+base_url = "http://localhost:7890/v1"
+
+[llm.eval_gpt4_1106_preview]
+model = "openai/Qwen/Qwen3-8B"
+api_key = "abc123"
+base_url = "http://localhost:7890/v1"
+log_completions = true
+
+[mcp]
+sse_servers = [
+    {url = "https://api.githubcopilot.com/mcp/"}
+]
