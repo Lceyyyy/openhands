@@ -15,7 +15,7 @@ export EXP_NAME=$EXP_NAME
 export DEFAULT_RUNTIME_RESOURCE_FACTOR=2
 echo "MODEL: $MODEL"
 echo "EXP_NAME: $EXP_NAME"
-DATASET="SWE-Gym/SWE-Gym-Lite"  # change this to the "/SWE-Gym-Lite" if you want to rollout the lite subset
+DATASET="SWE-Gym/SWE-Gym"  # change this to the "/SWE-Gym-Lite" if you want to rollout the lite subset
 SPLIT="train"
 
 if [ -z "$ALLHANDS_API_KEY" ]; then
@@ -29,8 +29,12 @@ else
 fi
 
 EVAL_LIMIT=1
-MAX_ITER=100
+MAX_ITER=300
 
+export SWE_BENCH_MCP_FILTER=true
+export SWE_BENCH_EVAL_MODE=true
+echo "SWE_BENCH_MCP_FILTER: $SWE_BENCH_MCP_FILTER"
+echo "SWE_BENCH_EVAL_MODE: $SWE_BENCH_EVAL_MODE"
 
 # ===== Run inference =====
 source "evaluation/utils/version_control.sh"

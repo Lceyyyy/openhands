@@ -97,7 +97,7 @@ Can you help me implement the necessary changes to the repository to test whethe
 I will take care of all changes to any of the non-test files. This means you DON'T have to modify the actual logic and ONLY have to update test logic and tests!
 Your task is to make the minimal changes to tests files in the /workspace directory to reproduce the issue in the <issue_description>, i.e., such that the generated tests fail in the current state (where the issue is unresolved) and pass when the issue will be resolved.
 Follow these steps to reproduce the issue:
-1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.
+1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure or to search on github using the search_issues , search_code and search_repositories tools to find similar questions.
 2. Create a script `reproduction.py` to reproduce the error and execute it with `python reproduction.py` using the BashTool, to confirm the error
 3. Edit the sourcecode of the repo to integrate your reproduction script into the test framework
 4. Run the test framework and make sure your tests fail! Only submit FAILING tests! Never submit passing tests.
@@ -169,7 +169,9 @@ Phase 7. VERIFICATION: Test your implementation thoroughly.
      8.2.3 The functions you changed
    8.3 If any tests fail, revise your implementation until all tests pass
 
-Be thorough in your exploration, testing, and reasoning. It's fine if your thinking process is lengthy - quality and completeness are more important than brevity.
+Be thorough in your exploration, testing, and reasoning. It's fine if your thinking process is lengthy - quality and completeness are more important than brevity. 
+<IMPORTANT!>Also, always remember to use the tools search_issues, search_code, and search_repositories to search on GitHub to gain a deeper understanding of the issue and find similar questions. Always search first before you delve into the question. This step is compulsory!!</IMPORTANT!>
+<IMPORTANT!>If you have already use the tools search_issues,search_code,search_repositories, you should not use them again.</IMPORTANT!>
 """
 
     if RUN_WITH_BROWSING:
@@ -234,6 +236,14 @@ def get_config(
         f'Please make sure this image exists. '
         f'Submit an issue on https://github.com/All-Hands-AI/OpenHands if you run into any issues.'
     )
+
+    # 添加swe-bench MCP过滤配置日志
+    swe_bench_mcp_filter = os.environ.get('SWE_BENCH_MCP_FILTER', 'false').lower() == 'true'
+    swe_bench_eval_mode = os.environ.get('SWE_BENCH_EVAL_MODE', 'false').lower() == 'true'
+    logger.info(f'SWE-Bench MCP filtering enabled: {swe_bench_mcp_filter}')
+    logger.info(f'SWE-Bench evaluation mode: {swe_bench_eval_mode}')
+    if swe_bench_mcp_filter:
+        logger.info('GitHub issue searches will be filtered to prevent SWE-Bench data contamination')
 
     sandbox_config = get_default_sandbox_config_for_eval()
     sandbox_config.base_container_image = base_container_image
@@ -649,6 +659,10 @@ def process_instance(
     reset_logger: bool = True,
     runtime_failure_count: int = 0,
 ) -> EvalOutput:
+    # 设置当前SWE-Bench任务信息，用于MCP过滤
+    from openhands.mcp.utils import set_current_swe_bench_task
+    set_current_swe_bench_task(instance.instance_id)
+    
     config = get_config(instance, metadata)
 
     # Setup the logger properly, so you can run multi-processing to parallelize the evaluation

@@ -1,5 +1,7 @@
 import json
-from typing import TYPE_CHECKING
+import os
+import re
+from typing import TYPE_CHECKING, Optional, Tuple
 
 if TYPE_CHECKING:
     from openhands.controller.agent import Agent
@@ -11,6 +13,85 @@ from openhands.events.observation.mcp import MCPObservation
 from openhands.events.observation.observation import Observation
 from openhands.mcp.client import MCPClient
 from openhands.runtime.base import Runtime
+
+
+# 全局变量存储当前正在评估的SWE-Bench任务信息
+_current_swe_bench_instance_id: Optional[str] = None
+_current_swe_bench_repo: Optional[str] = None
+_current_swe_bench_issue_number: Optional[int] = None
+
+
+def set_current_swe_bench_task(instance_id: str):
+    """
+    设置当前正在评估的SWE-Bench任务信息
+    instance_id格式: {org}__{repo}-{number}
+    例如: django__django-11099
+    """
+    global _current_swe_bench_instance_id, _current_swe_bench_repo, _current_swe_bench_issue_number
+    
+    _current_swe_bench_instance_id = instance_id
+    
+    # 解析instance_id获取repo和issue number
+    # 格式: {org}__{repo}-{number}
+    match = re.match(r'^([^_]+)__([^-]+)-(\d+)$', instance_id)
+    if match:
+        org, repo, number = match.groups()
+        _current_swe_bench_repo = f"{org}/{repo}"
+        _current_swe_bench_issue_number = int(number)
+        logger.info(f"Set current SWE-Bench task: repo={_current_swe_bench_repo}, issue_number={_current_swe_bench_issue_number}")
+    else:
+        logger.warning(f"Could not parse SWE-Bench instance_id: {instance_id}")
+        _current_swe_bench_repo = None
+        _current_swe_bench_issue_number = None
+
+
+def get_current_swe_bench_task() -> Tuple[Optional[str], Optional[str], Optional[int]]:
+    """
+    获取当前正在评估的SWE-Bench任务信息
+    返回: (instance_id, repo, issue_number)
+    """
+    return _current_swe_bench_instance_id, _current_swe_bench_repo, _current_swe_bench_issue_number
+
+
+def should_block_swe_bench_issue(issue: dict) -> bool:
+    """
+    检查是否应该屏蔽这个issue（基于当前SWE-Bench任务）
+    """
+    # 如果没有设置当前任务，不屏蔽任何issue
+    if _current_swe_bench_repo is None or _current_swe_bench_issue_number is None:
+        return False
+    
+    # 检查issue的仓库和编号是否匹配当前任务
+    issue_repo = issue.get("repository", {}).get("full_name", "")
+    issue_number = issue.get("number")
+    
+    if issue_repo == _current_swe_bench_repo and issue_number == _current_swe_bench_issue_number:
+        logger.info(f"Blocking SWE-Bench issue: {issue_repo}#{issue_number}")
+        return True
+    
+    return False
+
+
+def filter_swe_bench_issues(issues: list) -> list:
+    """
+    过滤掉当前SWE-Bench任务对应的issue
+    """
+    if not issues:
+        return issues
+    
+    filtered_issues = []
+    blocked_count = 0
+    
+    for issue in issues:
+        if should_block_swe_bench_issue(issue):
+            blocked_count += 1
+        else:
+            filtered_issues.append(issue)
+    
+    if blocked_count > 0:
+        logger.info(f"Filtered {blocked_count} SWE-Bench task issue(s) from search results")
+    
+    return filtered_issues
 
 
 def convert_mcp_clients_to_tools(mcp_clients: list[MCPClient] | None) -> list[dict]:
@@ -36,6 +117,10 @@ def convert_mcp_clients_to_tools(mcp_clients: list[MCPClient] | None) -> list[di
             for tool in client.tools:
                 mcp_tools = tool.to_param()
                 if(mcp_tools["function"]["name"] == "search_issues" or mcp_tools["function"]["name"] == "search_repositories" or mcp_tools["function"]["name"] == "search_code"):
+                    # 为search_issues工具添加过滤说明
+                    if mcp_tools["function"]["name"] == "search_issues":
+                        if "description" in mcp_tools["function"]:
+                            mcp_tools["function"]["description"] += " (Note: Current SWE-bench task issues are filtered out for evaluation purposes)"
                     all_mcp_tools.append(mcp_tools)
     except Exception as e:
         logger.error(f'Error in convert_mcp_clients_to_tools: {e}')
@@ -110,6 +195,51 @@ async def fetch_mcp_tools_from_config(mcp_config: MCPConfig) -> list[dict]:
     return mcp_tools
 
 
+async def call_search_issues_with_filter(mcp_clients: list[MCPClient], action: MCPAction) -> Observation:
+    """
+    调用search_issues工具并过滤当前SWE-Bench任务对应的issue
+    """
+    # 检查是否启用了swe-bench过滤
+    if os.environ.get('SWE_BENCH_MCP_FILTER', 'false').lower() != 'true':
+        # 如果没有启用过滤，正常调用
+        return await call_tool_mcp(mcp_clients, action)
+    
+    # 获取当前SWE-Bench任务信息
+    instance_id, repo, issue_number = get_current_swe_bench_task()
+    
+    if instance_id:
+        logger.info(f"Filtering GitHub issues for SWE-Bench task: {instance_id} ({repo}#{issue_number})")
+    
+    # 正常调用search_issues工具
+    matching_client = None
+    for client in mcp_clients:
+        if "search_issues" in [tool.name for tool in client.tools]:
+            matching_client = client
+            break
+    
+    if matching_client is None:
+        raise ValueError('No matching MCP agent found for search_issues tool')
+    
+    # 调用原始工具
+    response = await matching_client.call_tool(action.name, action.arguments)
+    response_data = response.model_dump(mode='json')
+    
+    # 过滤结果中的当前SWE-Bench任务对应的issue
+    if "items" in response_data:
+        original_count = len(response_data["items"])
+        response_data["items"] = filter_swe_bench_issues(response_data["items"])
+        filtered_count = len(response_data["items"])
+        
+        response_data["total_count"] = filtered_count
+        
+        # 添加过滤说明
+        if filtered_count < original_count:
+            response_data["filter_note"] = f"Filtered {original_count - filtered_count} SWE-Bench task issue(s) for evaluation purposes"
+            logger.info(f"Filtered {original_count - filtered_count} SWE-Bench task issue(s) from search results")
+    
+    return MCPObservation(content=json.dumps(response_data))
+
+
 async def call_tool_mcp(mcp_clients: list[MCPClient], action: MCPAction) -> Observation:
     """
     Call a tool on an MCP server and return the observation.
@@ -125,6 +255,10 @@ async def call_tool_mcp(mcp_clients: list[MCPClient], action: MCPAction) -> Obse
         raise ValueError('No MCP clients found')
 
     logger.debug(f'MCP action received: {action}')
+
+    # 如果是search_issues工具，使用过滤逻辑
+    if action.name == "search_issues":
+        return await call_search_issues_with_filter(mcp_clients, action)
 
     # Find the MCP client that has the matching tool name
     matching_client = None

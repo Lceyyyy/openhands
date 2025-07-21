@@ -86,6 +86,12 @@ echo "RUN_WITH_BROWSING: $RUN_WITH_BROWSING"
 export LANGUAGE=$LANGUAGE
 echo "LANGUAGE: $LANGUAGE"
 
+# 添加swe-bench MCP过滤配置
+export SWE_BENCH_MCP_FILTER=true
+export SWE_BENCH_EVAL_MODE=true
+echo "SWE_BENCH_MCP_FILTER: $SWE_BENCH_MCP_FILTER"
+echo "SWE_BENCH_EVAL_MODE: $SWE_BENCH_EVAL_MODE"
+
 get_openhands_version
 
 echo "AGENT: $AGENT"
