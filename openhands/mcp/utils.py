@@ -56,19 +56,32 @@ def get_current_swe_bench_task() -> Tuple[Optional[str], Optional[str], Optional
 def should_block_swe_bench_issue(issue: dict) -> bool:
     """
     检查是否应该屏蔽这个issue（基于当前SWE-Bench任务）
+    支持从 repository.full_name 或 repository_url 提取 repo 名
     """
     # 如果没有设置当前任务，不屏蔽任何issue
     if _current_swe_bench_repo is None or _current_swe_bench_issue_number is None:
         return False
-    
-    # 检查issue的仓库和编号是否匹配当前任务
-    issue_repo = issue.get("repository", {}).get("full_name", "")
+
+    # 优先用 repository.full_name
+    issue_repo = issue.get("repository", {}).get("full_name")
+    if not issue_repo:
+        # 尝试从 repository_url 提取 owner/repo
+        repo_url = issue.get("repository_url", "")
+        # 例：https://api.github.com/repos/PetteriAimonen/focus-stack
+        if repo_url:
+            parts = repo_url.rstrip("/").split("/")
+            if len(parts) >= 2:
+                issue_repo = f"{parts[-2]}/{parts[-1]}"
+            else:
+                issue_repo = ""
+        else:
+            issue_repo = ""
     issue_number = issue.get("number")
-    
+
     if issue_repo == _current_swe_bench_repo and issue_number == _current_swe_bench_issue_number:
         logger.info(f"Blocking SWE-Bench issue: {issue_repo}#{issue_number}")
         return True
-    
+
     return False
 
 
